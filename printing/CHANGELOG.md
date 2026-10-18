@@ -17,6 +17,7 @@
 - Fix the Windows build bundling a `pdfium.dll` found on `PATH` instead of the one it compiles against
 - Fix Windows printing, `listPrinters` and `raster` blocking the UI thread: they now run on a dedicated print thread that serializes PDFium calls
 - Fix `directPrintPdf` on Windows never completing when the printer cannot be opened
+- Fix a Windows crash in `directPrintPdf` when the printer driver cannot be queried: the `DC_EXTRA` error value `-1` was used as the size of the driver data
 
 ## 5.15.0
 
