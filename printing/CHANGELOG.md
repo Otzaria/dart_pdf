@@ -20,6 +20,7 @@
 - Fix a Windows crash in `directPrintPdf` when the printer driver cannot be queried: the `DC_EXTRA` error value `-1` was used as the size of the driver data
 - Fix the Windows file dialog of print-to-file printers (Microsoft Print to PDF, XPS Document Writer, `FILE:` port) opening without an owner window, possibly behind the app: the file name is now asked in a dialog owned by the app window, and cancelling it or a failing `StartDoc` completes the job
 - Load PDFium on Windows from a private `pdfium_printing.dll` next to the plugin, so it no longer shares its non-thread-safe global state with another `pdfium.dll` loaded by the application
+- Fix `layoutPdf` and `directPrintPdf` never completing on Linux when the `onLayout` callback throws: the job is now cancelled and completes with the error, as on Android, iOS and macOS
 
 ## 5.15.0
 
