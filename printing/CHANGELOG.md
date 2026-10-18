@@ -15,6 +15,8 @@
 - Initialize PDFium on Windows on first use instead of at plugin registration, and destroy it only if the plugin initialized it
 - Add the `PRINTING_PDFIUM_DIR` CMake option on Windows to use an existing PDFium build instead of downloading one
 - Fix the Windows build bundling a `pdfium.dll` found on `PATH` instead of the one it compiles against
+- Fix Windows printing, `listPrinters` and `raster` blocking the UI thread: they now run on a dedicated print thread that serializes PDFium calls
+- Fix `directPrintPdf` on Windows never completing when the printer cannot be opened
 
 ## 5.15.0
 
