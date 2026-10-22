@@ -429,8 +429,9 @@ bool PrintJob::askOutputFile(const std::wstring& extension) {
 
   OPENFILENAME ofn{};
   ofn.lStructSize = sizeof(ofn);
-  // The window may have been deactivated while the job was spooling.
-  ofn.hwndOwner = ownerWindow ? ownerWindow : printing->getWindow();
+  // The window may have been deactivated, or closed, while the job was
+  // spooling.
+  ofn.hwndOwner = IsWindow(ownerWindow) ? ownerWindow : printing->getWindow();
   ofn.lpstrFilter = filter.c_str();
   ofn.lpstrFile = file;
   ofn.nMaxFile = MAX_PATH;
