@@ -22,7 +22,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <string>
 
@@ -59,7 +62,15 @@ print_job::print_job(FlMethodChannel* channel, int index)
     : channel(FL_METHOD_CHANNEL(g_object_ref(channel))), index(index) {}
 
 print_job::~print_job() {
+  if (dialog != nullptr) {
+    gtk_widget_destroy(GTK_WIDGET(dialog));
+    dialog = nullptr;
+  }
   g_clear_object(&printJob);
+  if (source_fd >= 0) {
+    close(source_fd);
+    source_fd = -1;
+  }
   g_clear_object(&channel);
 }
 
@@ -125,7 +136,7 @@ bool print_job::direct_print_pdf(const gchar* name,
   auto settings = gtk_print_settings_new();
   auto setup = gtk_page_setup_new();
   printJob = gtk_print_job_new(name, _printer, settings, setup);
-  this->write_job(data, size);
+  const bool queued = this->write_job(data, size);
 
   g_object_unref(_printer);
   g_object_unref(settings);
@@ -133,7 +144,7 @@ bool print_job::direct_print_pdf(const gchar* name,
   g_object_unref(printJob);
   printJob = nullptr;
 
-  return true;
+  return queued;
 }
 
 static void job_completed(GtkPrintJob* gtk_print_job,
@@ -211,6 +222,13 @@ bool print_job::print_pdf(const gchar* name,
     }
   }
 
+  if (_printer == nullptr) {
+    on_completed(this, false, "No printer selected");
+    g_clear_object(&settings);
+    g_clear_object(&setup);
+    return false;
+  }
+
   if (!gtk_printer_accepts_pdf(_printer)) {
     on_completed(this, false, "This printer does not accept PDF jobs");
     g_object_unref(_printer);
@@ -238,22 +256,52 @@ bool print_job::print_pdf(const gchar* name,
   return true;
 }
 
-void print_job::write_job(const uint8_t data[], size_t size) {
-  auto fd = syscall(SYS_memfd_create, "printing", 0);
+bool print_job::write_job(const uint8_t data[], size_t size) {
+  if (printJob == nullptr || data == nullptr || size == 0) {
+    on_completed(this, false, "Print job or PDF data is missing");
+    return false;
+  }
+
+  const int fd = static_cast<int>(syscall(SYS_memfd_create, "printing", MFD_CLOEXEC));
+  if (fd < 0) {
+    on_completed(this, false, "Unable to create PDF spool file");
+    return false;
+  }
+
   size_t offset = 0;
-  ssize_t n;
-  while ((n = write(fd, data + offset, size - offset)) >= 0 &&
-         size - offset > 0) {
-    offset += n;
-  }
-  if (n < 0) {
-    on_completed(this, false, "Unable to copy the PDF data");
+  while (offset < size) {
+    const ssize_t written = write(fd, data + offset, size - offset);
+    if (written < 0 && errno == EINTR) {
+      continue;
+    }
+    if (written <= 0) {
+      close(fd);
+      on_completed(this, false, "Unable to copy the PDF data");
+      return false;
+    }
+    offset += static_cast<size_t>(written);
   }
 
-  lseek(fd, 0, SEEK_SET);
+  if (lseek(fd, 0, SEEK_SET) < 0) {
+    close(fd);
+    on_completed(this, false, "Unable to rewind PDF spool file");
+    return false;
+  }
 
-  gtk_print_job_set_source_fd(printJob, fd, nullptr);
+  g_autoptr(GError) source_error = nullptr;
+  if (!gtk_print_job_set_source_fd(printJob, fd, &source_error)) {
+    close(fd);
+    on_completed(this, false,
+                 source_error != nullptr ? source_error->message
+                                         : "Unable to attach PDF spool file");
+    return false;
+  }
+
+  // gtk_print_job_set_source_fd wraps the descriptor without closing it on
+  // GIOChannel unref. The completion callback deletes this job, closing fd.
+  source_fd = fd;
   gtk_print_job_send(printJob, job_completed, this, nullptr);
+  return true;
 }
 
 void print_job::cancel_job(const gchar* error) {
@@ -325,10 +373,29 @@ void print_job::raster_pdf(const uint8_t data[],
     auto width = FPDF_GetPageWidth(page);
     auto height = FPDF_GetPageHeight(page);
 
-    auto bWidth = static_cast<int>(width * scale);
-    auto bHeight = static_cast<int>(height * scale);
+    const double pixelWidth = width * scale;
+    const double pixelHeight = height * scale;
+    if (!std::isfinite(pixelWidth) || !std::isfinite(pixelHeight) ||
+        pixelWidth < 1.0 || pixelHeight < 1.0 ||
+        pixelWidth > std::numeric_limits<int>::max() ||
+        pixelHeight > std::numeric_limits<int>::max()) {
+      FPDF_ClosePage(page);
+      FPDF_CloseDocument(doc);
+      release_pdfium();
+      on_page_raster_end(this, "Invalid raster dimensions");
+      return;
+    }
+    const auto bWidth = static_cast<int>(pixelWidth);
+    const auto bHeight = static_cast<int>(pixelHeight);
 
     auto bitmap = FPDFBitmap_Create(bWidth, bHeight, 1);
+    if (bitmap == nullptr) {
+      FPDF_ClosePage(page);
+      FPDF_CloseDocument(doc);
+      release_pdfium();
+      on_page_raster_end(this, "Unable to allocate raster bitmap");
+      return;
+    }
     FPDFBitmap_FillRect(bitmap, 0, 0, bWidth, bHeight, 0x00ffffff);
 
     FPDF_RenderPageBitmap(bitmap, page, 0, 0, bWidth, bHeight, 0,
