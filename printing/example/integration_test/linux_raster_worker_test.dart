@@ -52,6 +52,10 @@ void main() {
   testWidgets('Malformed PDF fails promptly and native state can be reused',
       (tester) async {
     final malformed = Uint8List.fromList(<int>[1, 2, 3, 4, 5]);
+    await expectLater(
+      Printing.raster(Uint8List(0)).toList().timeout(const Duration(seconds: 15)),
+      throwsA(isNot(isA<TimeoutException>())),
+    );
     for (var attempt = 0; attempt < 3; attempt++) {
       await expectLater(
         Printing.raster(malformed).toList().timeout(const Duration(seconds: 15)),
