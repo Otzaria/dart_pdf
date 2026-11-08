@@ -78,6 +78,8 @@ static void raster_task_run(gpointer data, gpointer user_data) {
         task->document.data(), task->document.size(),
         task->pages.empty() ? nullptr : task->pages.data(), task->pages.size(),
         task->scale);
+  } catch (const std::exception& error) {
+    on_page_raster_end(task->job.get(), error.what());
   } catch (...) {
     on_page_raster_end(task->job.get(), "Raster worker failed");
   }
