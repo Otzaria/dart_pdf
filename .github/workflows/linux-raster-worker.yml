@@ -1,0 +1,44 @@
+name: Linux raster worker
+
+on:
+  pull_request:
+    paths:
+      - 'printing/linux/**'
+      - 'printing/example/integration_test/linux_raster_worker_test.dart'
+      - 'printing/example/pubspec.yaml'
+      - '.github/workflows/linux-raster-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-raster:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+      - name: Install Linux build and display dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build pkg-config libgtk-3-dev xvfb
+      - name: Prepare example platform files
+        working-directory: printing/example
+        run: flutter create -t app --no-overwrite --org net.nfet --project-name example .
+      - name: Build Linux example
+        working-directory: printing/example
+        run: flutter build linux
+      - name: Run native raster responsiveness integration test
+        working-directory: printing/example
+        run: xvfb-run -a flutter test integration_test/linux_raster_worker_test.dart -d linux
