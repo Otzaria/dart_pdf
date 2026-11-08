@@ -42,22 +42,34 @@ jobs:
       - name: Prepare example platform files
         working-directory: printing/example
         run: flutter create -t app --no-overwrite --org net.nfet --project-name example .
-      - name: Build Linux example
-        working-directory: printing/example
+      - name: Prefetch pinned PDFium through the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          # PDFium is downloaded from GitHub by the upstream CMake helper and
-          # occasionally returns a transient 5xx. Retry from a clean CMake
-          # build tree; never relax the downloaded artifact itself.
-          for attempt in 1 2 3; do
-            if flutter build linux; then
-              exit 0
-            fi
-            rm -rf build/linux
-            sleep $((attempt * 4))
-          done
-          exit 1
+          arch="${{ runner.arch }}"
+          case "$arch" in
+            X64) asset='pdfium-linux-x64.tgz' ;;
+            ARM64) asset='pdfium-linux-arm64.tgz' ;;
+            *) echo "::error::unsupported runner arch $arch"; exit 2 ;;
+          esac
+          release_url='https://api.github.com/repos/bblanchon/pdfium-binaries/releases/tags/chromium%2F5200'
+          release_json="$(curl --fail --location --retry 8 --retry-all-errors --retry-delay 3 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$release_url")"
+          asset_url="$(jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url' <<<"$release_json")"
+          test -n "$asset_url" && test "$asset_url" != null
+          mkdir -p "$RUNNER_TEMP/pdfium"
+          curl --fail --location --retry 8 --retry-all-errors --retry-delay 3 --max-time 300 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' \
+            "$asset_url" -o "$RUNNER_TEMP/pdfium.tgz"
+          tar -xzf "$RUNNER_TEMP/pdfium.tgz" -C "$RUNNER_TEMP/pdfium"
+          test -f "$RUNNER_TEMP/pdfium/PDFiumConfig.cmake"
+          echo "PRINTING_PDFIUM_DIR=$RUNNER_TEMP/pdfium" >> "$GITHUB_ENV"
+
+      - name: Build Linux example
+        working-directory: printing/example
+        run: flutter build linux
       - name: Run native raster responsiveness integration test
         working-directory: printing/example
         run: xvfb-run -a flutter test integration_test/linux_raster_worker_test.dart -d linux
