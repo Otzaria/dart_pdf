@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -47,5 +48,50 @@ void main() {
           'Dart timer did not run while native rastering took '
           '${stopwatch.elapsedMilliseconds} ms',
     );
+  });
+  testWidgets('Malformed PDF fails promptly and native state can be reused',
+      (tester) async {
+    final malformed = Uint8List.fromList(<int>[1, 2, 3, 4, 5]);
+    for (var attempt = 0; attempt < 3; attempt++) {
+      await expectLater(
+        Printing.raster(malformed).toList().timeout(const Duration(seconds: 15)),
+        throwsA(isNot(isA<TimeoutException>())),
+      );
+    }
+
+    final document = pw.Document();
+    document.addPage(pw.Page(
+      build: (_) => pw.Center(child: pw.Text('Recovery')),
+    ));
+    final valid = await document.save();
+    for (var attempt = 0; attempt < 3; attempt++) {
+      expect(
+        await Printing.raster(valid).length.timeout(const Duration(seconds: 15)),
+        1,
+      );
+    }
+  });
+
+  testWidgets('Cancelling a Dart raster subscription does not poison later jobs',
+      (tester) async {
+    final document = pw.Document();
+    for (var i = 0; i < 12; i++) {
+      document.addPage(pw.Page(
+        build: (_) => pw.Center(child: pw.Text('Cancellation $i')),
+      ));
+    }
+    final bytes = await document.save();
+    final first = await Printing.raster(bytes, dpi: 144)
+        .take(1)
+        .toList()
+        .timeout(const Duration(seconds: 20));
+    expect(first, hasLength(1));
+
+    // The native raster task is allowed to finish; the next task must still
+    // complete normally even if Dart cancelled its page subscription.
+    final pages = await Printing.raster(bytes)
+        .toList()
+        .timeout(const Duration(seconds: 30));
+    expect(pages, hasLength(12));
   });
 }
