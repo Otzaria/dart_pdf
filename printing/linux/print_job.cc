@@ -106,43 +106,48 @@ FlValue* print_job::list_printers() {
   return printers;
 }
 
-static GtkPrinter* _printer;
+struct PrinterSearch {
+  const gchar* name;
+  GtkPrinter* result = nullptr;
+};
 
 static gboolean search_printer(GtkPrinter* printer, gpointer data) {
-  auto search = static_cast<gchar*>(data);
-  auto name = gtk_printer_get_name(printer);
-
-  if (strcmp(name, search) == 0) {
-    _printer = static_cast<GtkPrinter*>(g_object_ref(printer));
-    return true;
+  auto search = static_cast<PrinterSearch*>(data);
+  if (strcmp(gtk_printer_get_name(printer), search->name) == 0) {
+    search->result = GTK_PRINTER(g_object_ref(printer));
+    return TRUE;
   }
+  return FALSE;
+}
 
-  return false;
+// The selected printer belongs to this invocation, not a process-wide global.
+static GtkPrinter* find_printer(const gchar* name) {
+  if (name == nullptr) {
+    return nullptr;
+  }
+  PrinterSearch search{name};
+  gtk_enumerate_printers(search_printer, &search, nullptr, TRUE);
+  return search.result;
 }
 
 bool print_job::direct_print_pdf(const gchar* name,
                                  const uint8_t data[],
                                  size_t size,
                                  const gchar* printer) {
-  _printer = nullptr;
-  auto pname = strdup(printer);
-  gtk_enumerate_printers(search_printer, pname, nullptr, true);
-  free(pname);
-
-  if (!_printer) {
+  auto selectedPrinter = find_printer(printer);
+  if (selectedPrinter == nullptr) {
     return false;
   }
 
   auto settings = gtk_print_settings_new();
   auto setup = gtk_page_setup_new();
-  printJob = gtk_print_job_new(name, _printer, settings, setup);
+  printJob = gtk_print_job_new(name, selectedPrinter, settings, setup);
   const bool queued = this->write_job(data, size);
 
-  g_object_unref(_printer);
+  g_object_unref(selectedPrinter);
   g_object_unref(settings);
   g_object_unref(setup);
-  g_object_unref(printJob);
-  printJob = nullptr;
+  g_clear_object(&printJob);
 
   return queued;
 }
@@ -168,16 +173,13 @@ bool print_job::print_pdf(const gchar* name,
                           double marginTop,
                           double marginRight,
                           double marginBottom) {
-  GtkPrintSettings* settings;
-  GtkPageSetup* setup;
+  GtkPrintSettings* settings = nullptr;
+  GtkPageSetup* setup = nullptr;
+  GtkPrinter* selectedPrinter = nullptr;
 
   if (printer != nullptr) {
-    _printer = nullptr;
-    auto pname = strdup(printer);
-    gtk_enumerate_printers(search_printer, pname, nullptr, true);
-    free(pname);
-
-    if (!_printer) {
+    selectedPrinter = find_printer(printer);
+    if (selectedPrinter == nullptr) {
       on_completed(this, false, "Printer not found");
       return false;
     }
@@ -201,12 +203,20 @@ bool print_job::print_pdf(const gchar* name,
 
       switch (response) {
         case GTK_RESPONSE_OK: {
-          _printer = gtk_print_unix_dialog_get_selected_printer(
+          // GtkPrinter and GtkPageSetup are transfer-none, while settings
+          // are newly allocated. Retain borrowed values before dialog teardown.
+          auto borrowedPrinter = gtk_print_unix_dialog_get_selected_printer(
               GTK_PRINT_UNIX_DIALOG(dialog));
+          selectedPrinter = borrowedPrinter != nullptr
+                                ? GTK_PRINTER(g_object_ref(borrowedPrinter))
+                                : nullptr;
           settings =
               gtk_print_unix_dialog_get_settings(GTK_PRINT_UNIX_DIALOG(dialog));
-          setup = gtk_print_unix_dialog_get_page_setup(
+          auto borrowedSetup = gtk_print_unix_dialog_get_page_setup(
               GTK_PRINT_UNIX_DIALOG(dialog));
+          setup = borrowedSetup != nullptr
+                      ? GTK_PAGE_SETUP(g_object_ref(borrowedSetup))
+                      : nullptr;
           gtk_widget_hide(GTK_WIDGET(dialog));
           loop = false;
         } break;
@@ -222,16 +232,17 @@ bool print_job::print_pdf(const gchar* name,
     }
   }
 
-  if (_printer == nullptr) {
-    on_completed(this, false, "No printer selected");
+  if (selectedPrinter == nullptr || settings == nullptr || setup == nullptr) {
+    on_completed(this, false, "Printer or page setup is unavailable");
+    g_clear_object(&selectedPrinter);
     g_clear_object(&settings);
     g_clear_object(&setup);
     return false;
   }
 
-  if (!gtk_printer_accepts_pdf(_printer)) {
+  if (!gtk_printer_accepts_pdf(selectedPrinter)) {
     on_completed(this, false, "This printer does not accept PDF jobs");
-    g_object_unref(_printer);
+    g_object_unref(selectedPrinter);
     g_object_unref(settings);
     g_object_unref(setup);
     return false;
@@ -244,12 +255,12 @@ bool print_job::print_pdf(const gchar* name,
   auto _marginRight = gtk_page_setup_get_right_margin(setup, GTK_UNIT_POINTS);
   auto _marginBottom = gtk_page_setup_get_bottom_margin(setup, GTK_UNIT_POINTS);
 
-  printJob = gtk_print_job_new(name, _printer, settings, setup);
+  printJob = gtk_print_job_new(name, selectedPrinter, settings, setup);
 
   on_layout(this, _width, _height, _marginLeft, _marginTop, _marginRight,
             _marginBottom);
 
-  g_object_unref(_printer);
+  g_object_unref(selectedPrinter);
   g_object_unref(settings);
   g_object_unref(setup);
 
