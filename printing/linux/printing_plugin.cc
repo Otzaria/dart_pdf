@@ -16,6 +16,7 @@
 
 #include "include/printing/printing_plugin.h"
 
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -35,6 +36,8 @@ struct _PrintingPlugin {
 
   FlMethodChannel* channel;
   GThreadPool* raster_pool;
+  // Ref-counted because a native raster task may outlive plugin disposal.
+  std::shared_ptr<std::atomic<int>>* raster_inflight;
 };
 
 G_DEFINE_TYPE(PrintingPlugin, printing_plugin, g_object_get_type())
@@ -43,8 +46,29 @@ struct RasterTask {
   std::unique_ptr<print_job> job;
   std::vector<uint8_t> document;
   std::vector<int32_t> pages;
+  std::shared_ptr<std::atomic<int>> raster_inflight;
   double scale;
+
+  ~RasterTask() {
+    if (raster_inflight) {
+      raster_inflight->fetch_sub(1, std::memory_order_release);
+    }
+  }
 };
+
+// One executing raster and at most one queued request. This bounds the number
+// of retained PDF documents without rejecting a large *single* document.
+static constexpr int kMaxOutstandingRasterRequests = 2;
+static bool reserve_raster_slot(const std::shared_ptr<std::atomic<int>>& counter) {
+  int count = counter->load(std::memory_order_acquire);
+  while (count < kMaxOutstandingRasterRequests) {
+    if (counter->compare_exchange_weak(
+            count, count + 1, std::memory_order_acq_rel)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 static void raster_task_run(gpointer data, gpointer user_data) {
   (void)user_data;
@@ -129,8 +153,10 @@ static void printing_plugin_handle_method_call(PrintingPlugin* self,
     auto jobNum = fl_value_get_int(fl_value_lookup_string(args, "job"));
 
     bool queued = false;
-    if (self->raster_pool != nullptr) {
+    if (self->raster_pool != nullptr &&
+        reserve_raster_slot(*self->raster_inflight)) {
       auto task = std::make_unique<RasterTask>();
+      task->raster_inflight = *self->raster_inflight;
       task->job = std::make_unique<print_job>(self->channel, jobNum);
       task->document.assign(doc, doc + size);
       task->pages = std::move(pages);
@@ -147,7 +173,10 @@ static void printing_plugin_handle_method_call(PrintingPlugin* self,
       }
     } else {
       auto failed_job = std::make_unique<print_job>(self->channel, jobNum);
-      on_page_raster_end(failed_job.get(), "Raster worker is unavailable");
+      on_page_raster_end(
+          failed_job.get(),
+          self->raster_pool == nullptr ? "Raster worker is unavailable"
+                                       : "Raster queue is full");
     }
 
     g_autoptr(FlValue) result = fl_value_new_bool(queued);
@@ -163,12 +192,14 @@ static void printing_plugin_handle_method_call(PrintingPlugin* self,
 static void printing_plugin_dispose(GObject* object) {
   auto self = PRINTING_PLUGIN(object);
   if (self->raster_pool != nullptr) {
-    // Finish queued native work before the plugin releases its final resources.
-    // Jobs only post callbacks to the main context; they never wait for it, so
-    // this cannot form a worker/main-thread cycle.
-    g_thread_pool_free(self->raster_pool, FALSE, TRUE);
+    // Do not join native PDFium work on the GTK/UI thread. Each queued task
+    // owns its input, channel reference and admission counter; callbacks post
+    // to the main context and may safely arrive after plugin disposal.
+    g_thread_pool_free(self->raster_pool, FALSE, FALSE);
     self->raster_pool = nullptr;
   }
+  delete self->raster_inflight;
+  self->raster_inflight = nullptr;
   G_OBJECT_CLASS(printing_plugin_parent_class)->dispose(object);
 }
 
@@ -177,6 +208,8 @@ static void printing_plugin_class_init(PrintingPluginClass* klass) {
 }
 
 static void printing_plugin_init(PrintingPlugin* self) {
+  self->raster_inflight =
+      new std::shared_ptr<std::atomic<int>>(std::make_shared<std::atomic<int>>(0));
   g_autoptr(GError) error = nullptr;
   self->raster_pool =
       g_thread_pool_new(raster_task_run, nullptr, 1, FALSE, &error);
