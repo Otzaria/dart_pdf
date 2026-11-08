@@ -17,7 +17,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        include:
+          - runner: ubuntu-latest
+            channel: stable
+          - runner: ubuntu-24.04-arm
+            # Stable ARM64 discovery is currently broken in flutter-action;
+            # the repository's existing ARM job uses master artifacts too.
+            channel: master
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -26,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: ${{ matrix.channel }}
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
       - name: Install Linux build and display dependencies
@@ -38,7 +44,20 @@ jobs:
         run: flutter create -t app --no-overwrite --org net.nfet --project-name example .
       - name: Build Linux example
         working-directory: printing/example
-        run: flutter build linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          # PDFium is downloaded from GitHub by the upstream CMake helper and
+          # occasionally returns a transient 5xx. Retry from a clean CMake
+          # build tree; never relax the downloaded artifact itself.
+          for attempt in 1 2 3; do
+            if flutter build linux; then
+              exit 0
+            fi
+            rm -rf build/linux
+            sleep $((attempt * 4))
+          done
+          exit 1
       - name: Run native raster responsiveness integration test
         working-directory: printing/example
         run: xvfb-run -a flutter test integration_test/linux_raster_worker_test.dart -d linux
