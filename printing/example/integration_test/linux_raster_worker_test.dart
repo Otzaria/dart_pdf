@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:ffi';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:pdf/pdf.dart';
@@ -98,4 +101,75 @@ void main() {
         .timeout(const Duration(seconds: 30));
     expect(pages, hasLength(12));
   });
+
+  testWidgets('PDFium 8125 remains live through isolated printing 5200 jobs',
+      (tester) async {
+    final publicPath = Platform.environment['PRINTING_PUBLIC_PDFIUM'];
+    expect(publicPath, isNotNull,
+        reason: 'A real Chromium/8125 Linux binary must be supplied by CI.');
+    final publicLibrary = DynamicLibrary.open(publicPath!);
+    final init = publicLibrary.lookupFunction<Void Function(), void Function()>(
+      'FPDF_InitLibrary',
+    );
+    final destroy =
+        publicLibrary.lookupFunction<Void Function(), void Function()>(
+          'FPDF_DestroyLibrary',
+        );
+    final load = publicLibrary.lookupFunction<
+        Pointer<Void> Function(Pointer<Void>, IntPtr, Pointer<Void>),
+        Pointer<Void> Function(Pointer<Void>, int, Pointer<Void>)>(
+      'FPDF_LoadMemDocument64',
+    );
+    final pageCount =
+        publicLibrary.lookupFunction<Int32 Function(Pointer<Void>),
+            int Function(Pointer<Void>)>('FPDF_GetPageCount');
+    final close = publicLibrary.lookupFunction<
+        Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+      'FPDF_CloseDocument',
+    );
+
+    final document = pw.Document();
+    for (var i = 0; i < 24; i++) {
+      document.addPage(pw.Page(
+        build: (_) => pw.Center(child: pw.Text('PDFium coexistence $i')),
+      ));
+    }
+    final bytes = await document.save();
+    final ownedBytes = calloc<Uint8>(bytes.length);
+    ownedBytes.asTypedList(bytes.length).setAll(0, bytes);
+
+    Pointer<Void> publicDocument = nullptr;
+    Timer? publicPoller;
+    var publicChecks = 0;
+    init();
+    try {
+      publicDocument = load(ownedBytes.cast<Void>(), bytes.length, nullptr);
+      expect(publicDocument, isNot(nullptr));
+      expect(pageCount(publicDocument), 24);
+
+      // The 8125 document is kept open in the ELF base namespace while the
+      // printing plugin repeatedly initializes/renders/destroys its private
+      // 5200 instance in a distinct dlmopen namespace.
+      publicPoller = Timer.periodic(const Duration(milliseconds: 5), (_) {
+        expect(pageCount(publicDocument), 24);
+        publicChecks++;
+      });
+      for (var attempt = 0; attempt < 3; attempt++) {
+        final result = await Printing.raster(bytes, dpi: 108)
+            .length
+            .timeout(const Duration(seconds: 30));
+        expect(result, 24);
+        expect(pageCount(publicDocument), 24);
+      }
+      expect(publicChecks, greaterThan(2));
+    } finally {
+      publicPoller?.cancel();
+      if (publicDocument != nullptr) {
+        close(publicDocument);
+      }
+      destroy();
+      calloc.free(ownedBytes);
+    }
+  });
+
 }
