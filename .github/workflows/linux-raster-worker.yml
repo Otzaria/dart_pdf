@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+# Multiple commits can arrive while shared organization runners are busy.
+# Only the latest SHA needs its expensive Linux matrix.
+concurrency:
+  group: printing-linux-pdfium-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux-raster:
     strategy:
@@ -124,3 +130,10 @@ jobs:
       - name: Run native raster and cross-version coexistence integration tests
         working-directory: printing/example
         run: xvfb-run -a flutter test integration_test/linux_raster_worker_test.dart -d linux
+      # A separate Flutter process must exercise the reverse loading order:
+      # initialize 8125 first, then dynamically load printing 5200.
+      - name: Test public-before-private PDFium load order
+        working-directory: printing/example
+        run: |
+          xvfb-run -a flutter test integration_test/linux_raster_worker_test.dart -d linux \
+            --plain-name 'PDFium 8125 remains live through isolated printing 5200 jobs'
