@@ -32,6 +32,9 @@
 // only the last one destroys it.
 static int library_ref_count = 0;
 static std::mutex library_mutex;
+// The Linux plugin used to raster on the GTK thread, which serialized PDFium
+// accidentally. Background raster jobs must retain that process-wide ordering.
+static std::mutex pdfium_work_mutex;
 
 static void acquire_pdfium() {
   const std::lock_guard<std::mutex> lock{library_mutex};
@@ -53,9 +56,12 @@ static void release_pdfium() {
 }
 
 print_job::print_job(FlMethodChannel* channel, int index)
-    : channel(channel), index(index) {}
+    : channel(FL_METHOD_CHANNEL(g_object_ref(channel))), index(index) {}
 
-print_job::~print_job() {}
+print_job::~print_job() {
+  g_clear_object(&printJob);
+  g_clear_object(&channel);
+}
 
 static gboolean add_printer(GtkPrinter* printer, gpointer data) {
   auto printers = static_cast<FlValue*>(data);
@@ -125,6 +131,7 @@ bool print_job::direct_print_pdf(const gchar* name,
   g_object_unref(settings);
   g_object_unref(setup);
   g_object_unref(printJob);
+  printJob = nullptr;
 
   return true;
 }
@@ -135,9 +142,11 @@ static void job_completed(GtkPrintJob* gtk_print_job,
   auto job = static_cast<print_job*>(user_data);
   if (job->dialog) {
     gtk_widget_destroy(GTK_WIDGET(job->dialog));
+    job->dialog = nullptr;
   }
   on_completed(job, error == nullptr,
                error != nullptr ? error->message : nullptr);
+  delete job;
 }
 
 bool print_job::print_pdf(const gchar* name,
@@ -194,8 +203,10 @@ bool print_job::print_pdf(const gchar* name,
           break;
         default:  // Cancel
           gtk_widget_destroy(GTK_WIDGET(dialog));
+          dialog = nullptr;
           on_completed(this, false, nullptr);
-          return true;
+          // The method handler owns this job until print_pdf returns false.
+          return false;
       }
     }
   }
@@ -282,6 +293,7 @@ void print_job::raster_pdf(const uint8_t data[],
                            const int32_t pages[],
                            size_t pages_count,
                            double scale) {
+  const std::lock_guard<std::mutex> work_lock{pdfium_work_mutex};
   acquire_pdfium();
 
   auto doc = FPDF_LoadMemDocument64(data, size, nullptr);
