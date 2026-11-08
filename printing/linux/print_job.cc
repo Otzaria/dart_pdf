@@ -361,7 +361,7 @@ void print_job::raster_pdf(const uint8_t data[],
 
   for (auto pn = 0; pn < pages_count; pn++) {
     auto n = allPages ? pn : pages[pn];
-    if (n >= pageCount) {
+    if (n < 0 || n >= pageCount) {
       continue;
     }
 
@@ -402,8 +402,22 @@ void print_job::raster_pdf(const uint8_t data[],
                           FPDF_ANNOT | FPDF_LCD_TEXT | FPDF_NO_NATIVETEXT);
 
     uint8_t* p = static_cast<uint8_t*>(FPDFBitmap_GetBuffer(bitmap));
-    auto stride = FPDFBitmap_GetStride(bitmap);
-    size_t l = static_cast<size_t>(bHeight * stride);
+    const int stride = FPDFBitmap_GetStride(bitmap);
+    // Check both the minimum RGBA row size and multiplication *before*
+    // calculating the image length. The old int multiplication could overflow.
+    if (p == nullptr || stride <= 0 ||
+        static_cast<size_t>(stride) < static_cast<size_t>(bWidth) * 4u ||
+        static_cast<size_t>(bHeight) >
+            std::numeric_limits<size_t>::max() / static_cast<size_t>(stride)) {
+      FPDFBitmap_Destroy(bitmap);
+      FPDF_ClosePage(page);
+      FPDF_CloseDocument(doc);
+      release_pdfium();
+      on_page_raster_end(this, "Invalid PDFium raster buffer");
+      return;
+    }
+    const size_t l = static_cast<size_t>(bHeight) *
+                     static_cast<size_t>(stride);
 
     // BGRA to RGBA conversion
     for (auto y = 0; y < bHeight; y++) {
