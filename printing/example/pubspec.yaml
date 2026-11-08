@@ -22,6 +22,8 @@ dependency_overrides:
 
 dev_dependencies:
   flutter_lints:
+  integration_test:
+    sdk: flutter
 
 flutter:
   uses-material-design: true
