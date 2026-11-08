@@ -137,6 +137,23 @@ static void printing_plugin_handle_method_call(PrintingPlugin* self,
 
   } else if (strcmp(method, "rasterPdf") == 0) {
     auto doc_value = fl_value_lookup_string(args, "doc");
+    if (doc_value == nullptr ||
+        fl_value_get_type(doc_value) != FL_VALUE_TYPE_UINT8_LIST ||
+        fl_value_get_length(doc_value) == 0) {
+      // Empty or malformed document arguments must not be passed through
+      // pointer arithmetic into the native raster task.
+      auto job_value = fl_value_lookup_string(args, "job");
+      if (job_value != nullptr &&
+          fl_value_get_type(job_value) == FL_VALUE_TYPE_INT) {
+        auto failed_job = std::make_unique<print_job>(
+            self->channel, fl_value_get_int(job_value));
+        on_page_raster_end(failed_job.get(), "PDF document is empty or invalid");
+      }
+      g_autoptr(FlValue) result = fl_value_new_bool(false);
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+      fl_method_call_respond(method_call, response, nullptr);
+      return;
+    }
     auto doc = fl_value_get_uint8_list(doc_value);
     auto size = fl_value_get_length(doc_value);
     auto v_pages = fl_value_lookup_string(args, "pages");
