@@ -73,7 +73,8 @@ void main() {
     final document = pw.Document();
     document.addPage(pw.Page(
       build: (_) => pw.Center(child: pw.Text('Recovery')),
-    ));
+    ),
+    );
     final valid = await document.save();
     for (var attempt = 0; attempt < 3; attempt++) {
       expect(
@@ -89,7 +90,8 @@ void main() {
     for (var i = 0; i < 12; i++) {
       document.addPage(pw.Page(
         build: (_) => pw.Center(child: pw.Text('Cancellation $i')),
-      ));
+      ),
+      );
     }
     final bytes = await document.save();
     final first = await Printing.raster(bytes, dpi: 144)
@@ -110,7 +112,8 @@ void main() {
       (tester) async {
     final publicPath = Platform.environment['PRINTING_PUBLIC_PDFIUM'];
     expect(publicPath, isNotNull,
-        reason: 'A real Chromium/8125 Linux binary must be supplied by CI.');
+        reason: 'A real Chromium/8125 Linux binary must be supplied by CI.',
+    );
     final publicLibrary = DynamicLibrary.open(publicPath!);
     final init = publicLibrary.lookupFunction<Void Function(), void Function()>(
       'FPDF_InitLibrary',
@@ -136,7 +139,8 @@ void main() {
     for (var i = 0; i < 24; i++) {
       document.addPage(pw.Page(
         build: (_) => pw.Center(child: pw.Text('PDFium coexistence $i')),
-      ));
+      ),
+      );
     }
     final bytes = await document.save();
     final ownedBytes = calloc<Uint8>(bytes.length);
