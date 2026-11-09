@@ -40,7 +40,9 @@ abstract class ImageProvider {
   /// The internal orientation of the image
   final PdfImageOrientation orientation;
 
-  final _cache = <int, PdfImage>{};
+  // Distinguish original-resolution images (null, null) from resized images.
+  // Both dimensions matter for providers with non-proportional image resizing.
+  final _cache = <(int?, int?), PdfImage>{};
 
   PdfImage buildImage(Context context, {int? width, int? height});
 
@@ -48,29 +50,20 @@ abstract class ImageProvider {
   /// The image is automatically added to the document
   PdfImage resolve(Context context, PdfPoint size, {double? dpi}) {
     final effectiveDpi = dpi ?? this.dpi;
+    final width = effectiveDpi == null
+        ? null
+        : (size.x / PdfPageFormat.inch * effectiveDpi).toInt();
+    final height = effectiveDpi == null
+        ? null
+        : (size.y / PdfPageFormat.inch * effectiveDpi).toInt();
+    final key = (width, height);
 
-    if (effectiveDpi == null || _cache[0] != null) {
-      _cache[0] ??= buildImage(context);
-
-      if (_cache[0]!.pdfDocument != context.document) {
-        _cache[0] = buildImage(context);
-      }
-
-      return _cache[0]!;
+    final cached = _cache[key];
+    if (cached != null && cached.pdfDocument == context.document) {
+      return cached;
     }
 
-    final width = (size.x / PdfPageFormat.inch * effectiveDpi).toInt();
-    final height = (size.y / PdfPageFormat.inch * effectiveDpi).toInt();
-
-    if (!_cache.containsKey(width)) {
-      _cache[width] ??= buildImage(context, width: width, height: height);
-    }
-
-    if (_cache[width]!.pdfDocument != context.document) {
-      _cache[width] = buildImage(context, width: width, height: height);
-    }
-
-    return _cache[width]!;
+    return _cache[key] = buildImage(context, width: width, height: height);
   }
 }
 

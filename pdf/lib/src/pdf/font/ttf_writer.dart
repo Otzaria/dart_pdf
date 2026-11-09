@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'ttf_parser.dart';
@@ -87,7 +86,6 @@ class TtfWriter {
     // Create the glyphs table
     final glyphsMap = <int, TtfGlyphInfo>{};
     final charMap = <int, int>{};
-    final overflow = <int>{};
     final compounds = <int, int>{};
 
     for (final char in chars) {
@@ -111,14 +109,21 @@ class TtfWriter {
         continue;
       }
 
-      void addGlyph(glyphIndex) {
+      void addGlyph(int glyphIndex) {
+        if (glyphsMap.containsKey(glyphIndex)) {
+          return;
+        }
+        if (glyphIndex < 0 || glyphIndex >= ttf.glyphOffsets.length) {
+          throw FormatException('Compound glyph index $glyphIndex is invalid');
+        }
         final glyph = ttf.readGlyph(glyphIndex).copy();
+        // Mark before visiting children so repeated/cyclic references do not
+        // repeatedly decode the same outline or recurse indefinitely.
+        glyphsMap[glyph.index] = glyph;
         for (final g in glyph.compounds) {
           compounds[g] = -1;
-          overflow.add(g);
           addGlyph(g);
         }
-        glyphsMap[glyph.index] = glyph;
       }
 
       charMap[char] = glyphIndex;
@@ -154,13 +159,18 @@ class TtfWriter {
 
     glyphsInfo.addAll(glyphsMap.values);
 
-    // Add compound glyphs
+    // Build an original-GID -> subset-GID index once; a linear search for
+    // every compound component scales quadratically on complex fonts.
+    final subsetIndices = <int, int>{};
+    for (var index = 0; index < glyphsInfo.length; index++) {
+      subsetIndices.putIfAbsent(glyphsInfo[index].index, () => index);
+    }
     for (final compound in compounds.keys) {
-      final index = glyphsInfo.firstWhere(
-        (TtfGlyphInfo glyph) => glyph.index == compound,
-      );
-      compounds[compound] = glyphsInfo.indexOf(index);
-      assert((compounds[compound] ?? 0) >= 0, 'Unable to find the glyph');
+      final index = subsetIndices[compound];
+      if (index == null) {
+        throw FormatException('Missing compound glyph $compound in subset');
+      }
+      compounds[compound] = index;
     }
 
     // update compound indices
@@ -332,13 +342,17 @@ class TtfWriter {
       final start = ByteData(12 + numTables * 16);
       start.setUint32(0, 0x00010000);
       start.setUint16(4, numTables);
-      var pot = numTables;
-      while (pot & (pot - 1) != 0) {
-        pot++;
+      // sfnt uses the largest power of two <= numTables, not the next one.
+      var searchPower = 1;
+      var entrySelector = 0;
+      while (searchPower * 2 <= numTables) {
+        searchPower *= 2;
+        entrySelector++;
       }
-      start.setUint16(6, pot * 16);
-      start.setUint16(8, math.log(pot).toInt());
-      start.setUint16(10, pot * 16 - numTables * 16);
+      final searchRange = searchPower * 16;
+      start.setUint16(6, searchRange);
+      start.setUint16(8, entrySelector);
+      start.setUint16(10, numTables * 16 - searchRange);
 
       // Create the table directory
       var count = 0;

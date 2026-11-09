@@ -52,6 +52,7 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
   double? get forcedDpi;
 
   var _rastering = false;
+  var _rasterPending = false;
 
   Timer? _previewUpdate;
 
@@ -96,10 +97,27 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
 
   Future<void> _raster() async {
     if (_rastering) {
+      // Queue one latest request while an earlier render is in flight.
+      _rasterPending = true;
       return;
     }
-    _rastering = true;
 
+    _rastering = true;
+    try {
+      do {
+        _rasterPending = false;
+        await _renderRaster();
+      } while (mounted && _rasterPending);
+    } finally {
+      _rastering = false;
+    }
+  }
+
+  Future<void> _renderRaster() async {
+    // Use one snapshot of the requested output parameters.
+    final requestedFormat = pageFormat;
+    final requestedDpi = dpi;
+    final requestedPages = widget.pages;
     Uint8List doc;
 
     final printingInfo = info;
@@ -120,18 +138,17 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
         return true;
       }());
 
-      _rastering = false;
       return;
     }
 
     try {
-      doc = await widget.build(pageFormat);
+      doc = await widget.build(requestedFormat);
     } catch (exception, stack) {
       InformationCollector? collector;
 
       assert(() {
         collector = () sync* {
-          yield StringProperty('PageFormat', pageFormat.toString());
+          yield StringProperty('PageFormat', requestedFormat.toString());
         };
         return true;
       }());
@@ -145,13 +162,16 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
           informationCollector: collector,
         ),
       );
-      if (mounted) {
+      if (mounted && !_rasterPending) {
         setState(() {
           error = exception;
-          _rastering = false;
         });
       }
 
+      return;
+    }
+
+    if (!mounted || _rasterPending) {
       return;
     }
 
@@ -165,17 +185,21 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
       var pageNum = 0;
       await for (final PdfRaster page in Printing.raster(
         doc,
-        dpi: dpi,
-        pages: widget.pages,
+        dpi: requestedDpi,
+        pages: requestedPages,
       )) {
-        if (!mounted) {
-          _rastering = false;
+        if (!mounted || _rasterPending) {
+          return;
+        }
+        // PNG encoding yields; avoid publishing stale pixels afterwards.
+        final png = await page.toPng();
+        if (!mounted || _rasterPending) {
           return;
         }
         if (pages.length <= pageNum) {
           pages.add(
             PdfPreviewPageData(
-              image: MemoryImage(await page.toPng()),
+              image: MemoryImage(png),
               width: page.width,
               height: page.height,
             ),
@@ -183,7 +207,7 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
         } else {
           pages[pageNum].image.evict();
           pages[pageNum] = PdfPreviewPageData(
-            image: MemoryImage(await page.toPng()),
+            image: MemoryImage(png),
             width: page.width,
             height: page.height,
           );
@@ -196,6 +220,9 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
         pageNum++;
       }
 
+      if (!mounted || _rasterPending) {
+        return;
+      }
       if (pageNum < pages.length) {
         for (var index = pageNum; index < pages.length; index++) {
           pages[index].image.evict();
@@ -210,7 +237,7 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
 
       assert(() {
         collector = () sync* {
-          yield StringProperty('PageFormat', pageFormat.toString());
+          yield StringProperty('PageFormat', requestedFormat.toString());
         };
         return true;
       }());
@@ -232,6 +259,5 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
       }
     }
 
-    _rastering = false;
   }
 }
