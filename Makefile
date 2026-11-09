@@ -48,14 +48,14 @@ pdf/material.ttf:
 pdf/emoji.ttf:
 	@set -eu; \
 	  tmp="$@.tmp"; \
-	  trap 'rm -f "$tmp"' EXIT; \
+	  trap 'rm -f "$$tmp"' EXIT; \
 	  curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
-	    --output "$tmp" \
+	    --output "$$tmp" \
 	    "https://raw.githubusercontent.com/googlefonts/noto-emoji/99701e07d3d1fe1bdbcdb14964547f0fd592966f/2D/fonts/NotoColorEmoji.ttf"; \
-	  actual="$(git hash-object "$tmp")"; \
-	  test "$actual" = "e605743d05f261634f0b3f68a439d9b557d8f335" || \
-	    { echo "NotoColorEmoji.ttf: unexpected Git blob SHA $actual" >&2; exit 1; }; \
-	  mv "$tmp" "$@"
+	  actual="$$(git hash-object "$$tmp")"; \
+	  test "$$actual" = "e605743d05f261634f0b3f68a439d9b557d8f335" || \
+	    { echo "NotoColorEmoji.ttf: unexpected Git blob SHA $$actual" >&2; exit 1; }; \
+	  mv "$$tmp" "$@"
 
 demo/assets/logo.svg:
 	curl -L "http://pigment.github.io/fake-logos/logos/vector/color/auto-speed.svg" > $@
