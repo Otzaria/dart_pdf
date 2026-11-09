@@ -7,6 +7,7 @@
 - Speed up TrueType text output with a Unicode to CID lookup table
 - Subset TrueType fonts with many compound glyphs in linear time, and no longer overflow the stack on cyclic compound glyphs
 - Fix the searchRange, entrySelector and rangeShift fields of subset TrueType font headers
+- Fix ImageProvider reusing a resampled image for a different target height, and keep its image cache per document without retaining finished documents
 
 ## 3.13.1
 
