@@ -12,6 +12,7 @@
 - Speed up font fallback in rich text when many characters are missing from the primary font
 - Avoid a full-size intermediate copy when embedding raw RGB images (PdfImage with alpha: false)
 - Cache the page index in Context so repeated pageNumber and pageLabel reads no longer scan the page list
+- Keep zero-length glyphs such as the space empty when subsetting TrueType fonts, and give every character sharing a glyph (space and no-break space, Omega and Ohm sign) that glyph instead of an arbitrary one
 
 ## 3.13.1
 
