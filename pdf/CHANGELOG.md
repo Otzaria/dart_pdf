@@ -3,6 +3,7 @@
 ## 3.13.2
 
 - Grow the PDF output buffer geometrically, and make PdfStream.putStream append only the written bytes
+- Fix truncated compressed xref offsets when the xref stream starts exactly at a power of 256
 
 ## 3.13.1
 
