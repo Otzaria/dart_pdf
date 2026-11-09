@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.13.2
+
+- Grow the PDF output buffer geometrically, and make PdfStream.putStream append only the written bytes
+
 ## 3.13.1
 
 - Add output-stream serialization for memory-bounded PDF generation.
