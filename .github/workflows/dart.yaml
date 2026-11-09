@@ -30,6 +30,12 @@ jobs:
         run: make analyze
       - name: Run tests
         run: make test
+      - name: Diagnose TTF loading after a Linux test failure (QA branch only)
+        if: failure()
+        run: |
+          git hash-object pdf/emoji.ttf pdf/open-sans.ttf || true
+          cd pdf
+          dart test test/widget_text_test.dart
       - name: Run readme tests
         run: make test-readme
       - name: Verify that nothing changed
