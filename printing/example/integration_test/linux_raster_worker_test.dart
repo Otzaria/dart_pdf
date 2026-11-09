@@ -15,7 +15,8 @@ import 'linux_printing_footprint.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('Linux raster keeps the Dart event loop responsive', (tester) async {
+  testWidgets('Linux raster keeps the Dart event loop responsive',
+      (tester) async {
     final document = pw.Document();
     for (var page = 0; page < 60; page++) {
       document.addPage(
@@ -51,8 +52,7 @@ void main() {
     expect(
       timerTicks,
       greaterThan(2),
-      reason:
-          'Dart timer did not run while native rastering took '
+      reason: 'Dart timer did not run while native rastering took '
           '${stopwatch.elapsedMilliseconds} ms',
     );
   });
@@ -60,37 +60,46 @@ void main() {
       (tester) async {
     final malformed = Uint8List.fromList(<int>[1, 2, 3, 4, 5]);
     await expectLater(
-      Printing.raster(Uint8List(0)).toList().timeout(const Duration(seconds: 15)),
+      Printing.raster(Uint8List(0))
+          .toList()
+          .timeout(const Duration(seconds: 15)),
       throwsA(isNot(isA<TimeoutException>())),
     );
     for (var attempt = 0; attempt < 3; attempt++) {
       await expectLater(
-        Printing.raster(malformed).toList().timeout(const Duration(seconds: 15)),
+        Printing.raster(malformed)
+            .toList()
+            .timeout(const Duration(seconds: 15)),
         throwsA(isNot(isA<TimeoutException>())),
       );
     }
 
     final document = pw.Document();
-    document.addPage(pw.Page(
-      build: (_) => pw.Center(child: pw.Text('Recovery')),
-    ),
+    document.addPage(
+      pw.Page(
+        build: (_) => pw.Center(child: pw.Text('Recovery')),
+      ),
     );
     final valid = await document.save();
     for (var attempt = 0; attempt < 3; attempt++) {
       expect(
-        await Printing.raster(valid).length.timeout(const Duration(seconds: 15)),
+        await Printing.raster(valid)
+            .length
+            .timeout(const Duration(seconds: 15)),
         1,
       );
     }
   });
 
-  testWidgets('Cancelling a Dart raster subscription does not poison later jobs',
+  testWidgets(
+      'Cancelling a Dart raster subscription does not poison later jobs',
       (tester) async {
     final document = pw.Document();
     for (var i = 0; i < 12; i++) {
-      document.addPage(pw.Page(
-        build: (_) => pw.Center(child: pw.Text('Cancellation $i')),
-      ),
+      document.addPage(
+        pw.Page(
+          build: (_) => pw.Center(child: pw.Text('Cancellation $i')),
+        ),
       );
     }
     final bytes = await document.save();
@@ -111,8 +120,10 @@ void main() {
   testWidgets('PDFium 8125 remains live through isolated printing 5200 jobs',
       (tester) async {
     final publicPath = Platform.environment['PRINTING_PUBLIC_PDFIUM'];
-    expect(publicPath, isNotNull,
-        reason: 'A real Chromium/8125 Linux binary must be supplied by CI.',
+    expect(
+      publicPath,
+      isNotNull,
+      reason: 'A real Chromium/8125 Linux binary must be supplied by CI.',
     );
     final publicLibrary = DynamicLibrary.open(publicPath!);
     final init = publicLibrary.lookupFunction<Void Function(), void Function()>(
@@ -120,26 +131,27 @@ void main() {
     );
     final destroy =
         publicLibrary.lookupFunction<Void Function(), void Function()>(
-          'FPDF_DestroyLibrary',
-        );
+      'FPDF_DestroyLibrary',
+    );
     final load = publicLibrary.lookupFunction<
         Pointer<Void> Function(Pointer<Void>, IntPtr, Pointer<Void>),
         Pointer<Void> Function(Pointer<Void>, int, Pointer<Void>)>(
       'FPDF_LoadMemDocument64',
     );
-    final pageCount =
-        publicLibrary.lookupFunction<Int32 Function(Pointer<Void>),
-            int Function(Pointer<Void>)>('FPDF_GetPageCount');
-    final close = publicLibrary.lookupFunction<
-        Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+    final pageCount = publicLibrary.lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)>('FPDF_GetPageCount');
+    final close = publicLibrary.lookupFunction<Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)>(
       'FPDF_CloseDocument',
     );
 
     final document = pw.Document();
     for (var i = 0; i < 24; i++) {
-      document.addPage(pw.Page(
-        build: (_) => pw.Center(child: pw.Text('PDFium coexistence $i')),
-      ),
+      document.addPage(
+        pw.Page(
+          build: (_) => pw.Center(child: pw.Text('PDFium coexistence $i')),
+        ),
       );
     }
     final bytes = await document.save();
@@ -179,5 +191,4 @@ void main() {
       calloc.free(ownedBytes);
     }
   });
-
 }
