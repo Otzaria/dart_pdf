@@ -72,4 +72,17 @@ void main() {
     expect(outlines[2].$1, outlines[2].$2);
     expect(outlines[3].$1, outlines[3].$2);
   });
+
+  test('Chars missing from the font get .notdef, not another glyph', () {
+    // Hacen Tunisia has no combining hamza (U+0654, U+0655), which the Arabic
+    // reshaper emits for hamza with harakat; U+064D is kasratan.
+    final chars = [0, 0x655, 0x654, 0x64D];
+    final outlines = subsetOutlines('hacen-tunisia.ttf', chars);
+    final notdef = outlines[0].$1;
+    expect(notdef, isNotEmpty);
+    expect(outlines[1].$1, notdef);
+    expect(outlines[2].$1, notdef);
+    expect(outlines[3].$1, outlines[3].$2);
+    expect(outlines[3].$1, isNot(notdef));
+  });
 }
