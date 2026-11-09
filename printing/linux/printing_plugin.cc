@@ -71,6 +71,15 @@ static bool reserve_raster_slot(const std::shared_ptr<std::atomic<int>>& counter
   return false;
 }
 
+static gboolean keep_raster_task(gpointer data) {
+  (void)data;
+  return G_SOURCE_REMOVE;
+}
+
+static void release_raster_task(gpointer data) {
+  delete static_cast<RasterTask*>(data);
+}
+
 static void raster_task_run(gpointer data, gpointer user_data) {
   (void)user_data;
   std::unique_ptr<RasterTask> task(static_cast<RasterTask*>(data));
@@ -84,6 +93,11 @@ static void raster_task_run(gpointer data, gpointer user_data) {
   } catch (...) {
     on_page_raster_end(task->job.get(), "Raster worker failed");
   }
+  std::vector<uint8_t>().swap(task->document);
+  // The job may hold the last channel reference after engine shutdown, and
+  // disposing FlMethodChannel off the GTK thread touches the messenger.
+  printing_raster::post_message(keep_raster_task, task.release(),
+                                release_raster_task);
 }
 
 // Called when a method call is received from Flutter.
