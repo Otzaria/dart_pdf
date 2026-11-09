@@ -43,17 +43,17 @@ pdf/genyomintw.ttf:
 pdf/material.ttf:
 	curl -L "https://github.com/google/material-design-icons/raw/master/font/MaterialIcons-Regular.ttf" > $@
 
-# The upstream font moved from fonts/ to 2D/fonts/; the old URL returns HTML.
-# Pin both the source commit and Git blob SHA so CI never accepts a 404 body as a TTF.
+# The upstream font moved to 2D/fonts/ in September 2026. Pin the historical font
+# used by the September 2025 golden PDF, and validate its Git blob SHA.
 pdf/emoji.ttf:
 	@set -eu; \
 	  tmp="$@.tmp"; \
 	  trap 'rm -f "$$tmp"' EXIT; \
 	  curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
 	    --output "$$tmp" \
-	    "https://raw.githubusercontent.com/googlefonts/noto-emoji/99701e07d3d1fe1bdbcdb14964547f0fd592966f/2D/fonts/NotoColorEmoji.ttf"; \
+	    "https://raw.githubusercontent.com/googlefonts/noto-emoji/f3ae03f5e9b3b8516fa151f7168159ca1a3e7515/fonts/NotoColorEmoji.ttf"; \
 	  actual="$$(git hash-object "$$tmp")"; \
-	  test "$$actual" = "e605743d05f261634f0b3f68a439d9b557d8f335" || \
+	  test "$$actual" = "943741df1e37aa3ee3b5afc9129843fd8d81908c" || \
 	    { echo "NotoColorEmoji.ttf: unexpected Git blob SHA $$actual" >&2; exit 1; }; \
 	  mv "$$tmp" "$@"
 
