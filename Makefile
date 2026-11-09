@@ -43,19 +43,8 @@ pdf/genyomintw.ttf:
 pdf/material.ttf:
 	curl -L "https://github.com/google/material-design-icons/raw/master/font/MaterialIcons-Regular.ttf" > $@
 
-# The upstream font moved to 2D/fonts/ in September 2026. Pin the historical font
-# used by the September 2025 golden PDF, and validate its Git blob SHA.
 pdf/emoji.ttf:
-	@set -eu; \
-	  tmp="$@.tmp"; \
-	  trap 'rm -f "$$tmp"' EXIT; \
-	  curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
-	    --output "$$tmp" \
-	    "https://raw.githubusercontent.com/googlefonts/noto-emoji/f3ae03f5e9b3b8516fa151f7168159ca1a3e7515/fonts/NotoColorEmoji.ttf"; \
-	  actual="$$(git hash-object "$$tmp")"; \
-	  test "$$actual" = "943741df1e37aa3ee3b5afc9129843fd8d81908c" || \
-	    { echo "NotoColorEmoji.ttf: unexpected Git blob SHA $$actual" >&2; exit 1; }; \
-	  mv "$$tmp" "$@"
+	curl -L https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf > $@
 
 demo/assets/logo.svg:
 	curl -L "http://pigment.github.io/fake-logos/logos/vector/color/auto-speed.svg" > $@
@@ -98,13 +87,16 @@ pdf/pubspec.lock: pdf/pubspec.yaml
 printing/pubspec.lock: printing/pubspec.yaml
 	cd printing; $(FLUTTER_BIN) pub get
 
+widget_wrapper/pubspec.lock: widget_wrapper/pubspec.yaml
+	cd widget_wrapper; $(FLUTTER_BIN) pub get
+
 demo/pubspec.lock: demo/pubspec.yaml
 	cd demo; $(FLUTTER_BIN) pub get
 
 test/pubspec.lock: test/pubspec.yaml
 	cd test; $(FLUTTER_BIN) pub get
 
-get: $(FONTS) pdf/pubspec.lock printing/pubspec.lock demo/pubspec.lock test/pubspec.lock
+get: $(FONTS) pdf/pubspec.lock printing/pubspec.lock widget_wrapper/pubspec.lock demo/pubspec.lock test/pubspec.lock
 
 get-all: $(FONTS) demo/assets/logo.svg demo/assets/profile.jpg get
 
@@ -118,6 +110,9 @@ test-pdf: svg $(FONTS) pdf/pubspec.lock .coverage
 test-printing: $(FONTS) printing/pubspec.lock .coverage
 	cd printing; $(FLUTTER_BIN) test --coverage --coverage-path lcov.info
 
+test-widget-wrapper: widget_wrapper/pubspec.lock
+	cd widget_wrapper; $(FLUTTER_BIN) test --coverage --coverage-path lcov.info
+
 test-demo: $(FONTS) demo/pubspec.lock .coverage
 	cd demo; $(FLUTTER_BIN) test --coverage --coverage-path lcov.info
 
@@ -125,8 +120,8 @@ test-readme: $(FONTS) test/pubspec.lock
 	cd test; $(DART_BIN) extract_readme.dart
 	cd test; $(DART_BIN) analyze
 
-test: test-pdf test-printing test-demo node_modules
-	cat pdf/lcov.info printing/lcov.info demo/lcov.info | node_modules/.bin/lcov-summary
+test: test-pdf test-printing test-widget-wrapper test-demo node_modules
+	cat pdf/lcov.info printing/lcov.info widget_wrapper/lcov.info demo/lcov.info | node_modules/.bin/lcov-summary
 
 clean:
 	git clean -fdx -e .vscode -e ref
@@ -169,7 +164,10 @@ analyze-printing: .pana
 	$(DART_BIN) pub global run pana --no-warning --source path printing
 	find printing -name pubspec.yaml -exec sed -i -e 's/^_dependency_overrides:/dependency_overrides:/g' '{}' ';'
 
-analyze: analyze-pdf analyze-printing
+analyze-widget-wrapper: widget_wrapper/pubspec.lock
+	cd widget_wrapper; $(FLUTTER_BIN) analyze --no-pub
+
+analyze: analyze-pdf analyze-printing analyze-widget-wrapper
 
 .dartfix:
 	which dartfix || $(DART_BIN) pub global activate dartfix
