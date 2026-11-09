@@ -29,7 +29,7 @@ elseif(${PDFIUM_VERSION} STREQUAL "latest")
     PDFIUM_URL
     "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-${PDFIUM_ARCH}.tgz"
     )
-elseif(NOT PRINTING_PDFIUM_DIR)
+else()
   set(
     PDFIUM_URL
     "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_VERSION}/pdfium-linux-${PDFIUM_ARCH}.tgz"
@@ -77,9 +77,6 @@ pkg_check_modules(GTKUnixPrint
                   IMPORTED_TARGET
                   gtk+-unix-print-3.0)
 
-# This value is used when generating builds using this plugin, so it must not
-# be changed.
-set(PLUGIN_NAME "printing_plugin")
 add_library(${PLUGIN_NAME} SHARED
             "printing_plugin.cc"
             "include/printing/printing_plugin.h"
