@@ -8,6 +8,7 @@
 - Subset TrueType fonts with many compound glyphs in linear time, and no longer overflow the stack on cyclic compound glyphs
 - Fix the searchRange, entrySelector and rangeShift fields of subset TrueType font headers
 - Fix ImageProvider reusing a resampled image for a different target height, and keep its image cache per document without retaining finished documents
+- Fix the ToUnicode CMap: split mappings into blocks of at most 100 entries and encode characters above U+FFFF as UTF-16 surrogate pairs, so text with emoji and large character sets extracts correctly
 
 ## 3.13.1
 
