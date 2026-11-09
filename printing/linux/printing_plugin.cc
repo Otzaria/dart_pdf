@@ -26,6 +26,7 @@
 #include <gtk/gtk.h>
 
 #include "print_job.h"
+#include "raster_dispatch.h"
 
 #define PRINTING_PLUGIN(obj)                                     \
   (G_TYPE_CHECK_INSTANCE_CAST((obj), printing_plugin_get_type(), \
@@ -171,6 +172,11 @@ static void printing_plugin_handle_method_call(PrintingPlugin* self,
     auto scale = fl_value_get_float(fl_value_lookup_string(args, "scale"));
     auto jobNum = fl_value_get_int(fl_value_lookup_string(args, "job"));
 
+    g_autoptr(GError) worker_error = nullptr;
+    if (self->raster_pool == nullptr) {
+      self->raster_pool =
+          printing_raster::create_pool(raster_task_run, &worker_error);
+    }
     bool queued = false;
     if (self->raster_pool != nullptr &&
         reserve_raster_slot(*self->raster_inflight)) {
@@ -181,21 +187,17 @@ static void printing_plugin_handle_method_call(PrintingPlugin* self,
       task->pages = std::move(pages);
       task->scale = scale;
 
-      g_autoptr(GError) error = nullptr;
-      auto raw_task = task.release();
-      queued = g_thread_pool_push(self->raster_pool, raw_task, &error);
-      if (!queued) {
-        std::unique_ptr<RasterTask> failed_task(raw_task);
-        on_page_raster_end(failed_task->job.get(),
-                           error != nullptr ? error->message
-                                            : "Unable to queue raster job");
-      }
+      // The exclusive pool already owns its worker; enqueue cannot spawn one.
+      g_thread_pool_push(self->raster_pool, task.release(), nullptr);
+      queued = true;
     } else {
       auto failed_job = std::make_unique<print_job>(self->channel, jobNum);
       on_page_raster_end(
           failed_job.get(),
-          self->raster_pool == nullptr ? "Raster worker is unavailable"
-                                       : "Raster queue is full");
+          self->raster_pool == nullptr
+              ? (worker_error != nullptr ? worker_error->message
+                                         : "Raster worker is unavailable")
+              : "Raster queue is full");
     }
 
     g_autoptr(FlValue) result = fl_value_new_bool(queued);
@@ -229,13 +231,6 @@ static void printing_plugin_class_init(PrintingPluginClass* klass) {
 static void printing_plugin_init(PrintingPlugin* self) {
   self->raster_inflight =
       new std::shared_ptr<std::atomic<int>>(std::make_shared<std::atomic<int>>(0));
-  g_autoptr(GError) error = nullptr;
-  self->raster_pool =
-      g_thread_pool_new(raster_task_run, nullptr, 1, FALSE, &error);
-  if (self->raster_pool == nullptr) {
-    g_warning("Unable to create printing raster worker: %s",
-              error != nullptr ? error->message : "unknown error");
-  }
 }
 
 static void method_call_cb(FlMethodChannel* channel,
@@ -302,8 +297,8 @@ void on_page_rasterized(print_job* job,
   message->image.assign(data, data + size);
   message->width = width;
   message->height = height;
-  g_main_context_invoke_full(nullptr, G_PRIORITY_DEFAULT, deliver_raster_page,
-                             message.release(), destroy_raster_page);
+  printing_raster::post_message(deliver_raster_page, message.release(),
+                                destroy_raster_page);
 }
 
 struct RasterEndMessage {
@@ -340,8 +335,8 @@ void on_page_raster_end(print_job* job, const char* error) {
   if (error != nullptr) {
     message->error = error;
   }
-  g_main_context_invoke_full(nullptr, G_PRIORITY_DEFAULT, deliver_raster_end,
-                             message.release(), destroy_raster_end);
+  printing_raster::post_message(deliver_raster_end, message.release(),
+                                destroy_raster_end);
 }
 
 static void on_layout_response_cb(GObject* object,

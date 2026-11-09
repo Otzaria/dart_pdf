@@ -10,6 +10,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'linux_printing_footprint.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -33,6 +35,7 @@ void main() {
       (_) => timerTicks++,
     );
 
+    final rssBefore = ProcessInfo.currentRss;
     var rasterized = 0;
     final stopwatch = Stopwatch()..start();
     await for (final _ in Printing.raster(bytes, dpi: 144)) {
@@ -41,6 +44,7 @@ void main() {
     stopwatch.stop();
     timer.cancel();
 
+    reportPrintingFootprint(rssBefore);
     expect(rasterized, 60);
     // Rastering dozens of A4 pages is deliberately long enough that a
     // synchronous native method handler starves this timer completely.
