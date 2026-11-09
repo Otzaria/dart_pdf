@@ -10,6 +10,7 @@
 - Fix ImageProvider reusing a resampled image for a different target height, and keep its image cache per document without retaining finished documents
 - Fix the ToUnicode CMap: split mappings into blocks of at most 100 entries and encode characters above U+FFFF as UTF-16 surrogate pairs, so text with emoji and large character sets extracts correctly
 - Speed up font fallback in rich text when many characters are missing from the primary font
+- Avoid a full-size intermediate copy when embedding raw RGB images (PdfImage with alpha: false)
 
 ## 3.13.1
 
