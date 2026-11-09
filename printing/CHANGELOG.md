@@ -4,6 +4,7 @@
 
 - Fix `PdfRaster.toPng()` leaking the temporary `dart:ui` image it creates for each PNG encode
 - Share one in-flight download between simultaneous `PdfMemoryCache.resolve` calls for the same asset, and look the cache up once instead of `contains` then `get`
+- Fix `PdfPreview` dropping a page format change or refresh requested while a slow build or raster was running
 
 ## 5.15.1
 
