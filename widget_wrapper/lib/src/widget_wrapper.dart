@@ -80,7 +80,8 @@ class WidgetWrapper extends pw.ImageProvider {
         key.currentContext!.findRenderObject() as RenderRepaintBoundary;
     final image = await wrappedWidget.toImage(pixelRatio: pixelRatio);
     try {
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final byteData =
+          await image.toByteData(format: ui.ImageByteFormat.rawRgba);
 
       if (byteData == null) {
         return WidgetWrapper._(
