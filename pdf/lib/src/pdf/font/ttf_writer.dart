@@ -87,6 +87,7 @@ class TtfWriter {
     final glyphsMap = <int, TtfGlyphInfo>{};
     final charMap = <int, int>{};
     final compounds = <int, int>{};
+    final visited = <int>{};
 
     for (final char in chars) {
       if (char == 32) {
@@ -110,20 +111,21 @@ class TtfWriter {
       }
 
       void addGlyph(int glyphIndex) {
-        if (glyphsMap.containsKey(glyphIndex)) {
+        // Marked before the components are visited, so shared or cyclic
+        // references are decoded once and cannot recurse forever.
+        if (!visited.add(glyphIndex)) {
           return;
         }
         if (glyphIndex < 0 || glyphIndex >= ttf.glyphOffsets.length) {
           throw FormatException('Compound glyph index $glyphIndex is invalid');
         }
         final glyph = ttf.readGlyph(glyphIndex).copy();
-        // Mark before visiting children so repeated/cyclic references do not
-        // repeatedly decode the same outline or recurse indefinitely.
-        glyphsMap[glyph.index] = glyph;
         for (final g in glyph.compounds) {
           compounds[g] = -1;
           addGlyph(g);
         }
+        // Components first: this order decides the subset glyph ids.
+        glyphsMap[glyph.index] = glyph;
       }
 
       charMap[char] = glyphIndex;
